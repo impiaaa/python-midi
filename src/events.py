@@ -1,26 +1,23 @@
-import pdb
+import math
+
 class EventRegistry(object):
     Events = {}
     MetaEvents = {}
-    
+
     def register_event(cls, event, bases):
-        if MetaEvent in bases:
-            assert event.metacommand not in cls.MetaEvents, \
-                            "Event %s already registered" % event.name
-            cls.MetaEvents[event.metacommand] = event
-        elif (Event in bases) or (NoteEvent in bases):
+        if (Event in bases) or (NoteEvent in bases):
             assert event.statusmsg not in cls.Events, \
                             "Event %s already registered" % event.name
             cls.Events[event.statusmsg] = event
+        elif (MetaEvent in bases) or (MetaEventWithText in bases):
+            if event.metacommand is not None:
+                assert event.metacommand not in cls.MetaEvents, \
+                                "Event %s already registered" % event.name
+                cls.MetaEvents[event.metacommand] = event
         else:
             raise ValueError, "Unknown bases class in event type: "+event.name
     register_event = classmethod(register_event)
 
-
-"""
-EventMIDI : Concrete class used to describe MIDI Events.
-Inherits from Event.
-"""
 
 class AbstractEvent(object):
     __slots__ = ['tick', 'data']
@@ -30,7 +27,8 @@ class AbstractEvent(object):
 
     class __metaclass__(type):
         def __init__(cls, name, bases, dict):
-            if name not in ['AbstractEvent', 'Event', 'MetaEvent', 'NoteEvent']:
+            if name not in ['AbstractEvent', 'Event', 'MetaEvent', 'NoteEvent',
+                            'MetaEventWithText']:
                 EventRegistry.register_event(cls, bases)
 
     def __init__(self, **kw):
@@ -53,7 +51,7 @@ class AbstractEvent(object):
         body = []
         for key in keys:
             val = getattr(self, key)
-            keyval = "%s=%s" % (key, val)
+            keyval = "%s=%r" % (key, val)
             body.append(keyval)
         body = str.join(', ', body)
         return "midi.%s(%s)" % (self.__class__.__name__, body)
@@ -61,12 +59,7 @@ class AbstractEvent(object):
     def __repr__(self):
         return self.__baserepr__()
 
-"""
-MetaEvent is a special subclass of Event that is not meant to
-be used as a concrete class.  It defines a subset of Events known
-as the Meta  events.
-"""
-    
+
 class Event(AbstractEvent):
     __slots__ = ['channel']
     name = 'Event'
@@ -75,21 +68,17 @@ class Event(AbstractEvent):
         if 'channel' not in kw:
             kw = kw.copy()
             kw['channel'] = 0
-            #self.__kw = kw
         super(Event, self).__init__(**kw)
 
     def copy(self, **kw):
         _kw = {'channel': self.channel, 'tick': self.tick, 'data': self.data}
         _kw.update(kw)
-        return self.__class__(**_kw) 
+        return self.__class__(**_kw)
 
     def __cmp__(self, other):
         if self.tick < other.tick: return -1
         elif self.tick > other.tick: return 1
         return 0
-        #if self.channel < other.channel: return -1
-        #elif self.channel > other.channel: return 1
-        #return cmp(self.data, other.data)
 
     def __repr__(self):
         return self.__baserepr__(['channel'])
@@ -102,9 +91,9 @@ class Event(AbstractEvent):
 """
 MetaEvent is a special subclass of Event that is not meant to
 be used as a concrete class.  It defines a subset of Events known
-as the Meta  events.
+as the Meta events.
 """
-    
+
 class MetaEvent(AbstractEvent):
     statusmsg = 0xFF
     metacommand = 0x0
@@ -149,6 +138,18 @@ class AfterTouchEvent(Event):
     statusmsg = 0xA0
     length = 2
     name = 'After Touch'
+    
+    def get_pitch(self):
+        return self.data[0]
+    def set_pitch(self, val):
+        self.data[0] = val
+    pitch = property(get_pitch, set_pitch)
+    
+    def get_value(self):
+        return self.data[1]
+    def set_value(self, val):
+        self.data[1] = val
+    value = property(get_value, set_value)
 
 class ControlChangeEvent(Event):
     __slots__ = ['control', 'value']
@@ -167,7 +168,7 @@ class ControlChangeEvent(Event):
     def get_value(self):
         return self.data[1]
     value = property(get_value, set_value)
-    
+
 class ProgramChangeEvent(Event):
     __slots__ = ['value']
     statusmsg = 0xC0
@@ -202,8 +203,8 @@ class PitchWheelEvent(Event):
         return ((self.data[1] << 7) | self.data[0]) - 0x2000
     def set_pitch(self, pitch):
         value = pitch + 0x2000
-        self.data[0] = value & 0xFF
-        self.data[1] = (value >> 7) & 0xFF
+        self.data[0] = value & 0x7F
+        self.data[1] = (value >> 7) & 0x7F
     pitch = property(get_pitch, set_pitch)
 
 class SysexEvent(Event):
@@ -220,44 +221,68 @@ class SequenceNumberMetaEvent(MetaEvent):
     metacommand = 0x00
     length = 2
 
-class TextMetaEvent(MetaEvent):
+class MetaEventWithText(MetaEvent):
+    def __init__(self, **kw):
+        super(MetaEventWithText, self).__init__(**kw)
+        if 'text' not in kw:
+            self.text = ''.join(chr(datum) for datum in self.data)
+    
+    def __repr__(self):
+        return self.__baserepr__(['text'])
+
+class TextMetaEvent(MetaEventWithText):
     name = 'Text'
     metacommand = 0x01
     length = 'varlen'
 
-class CopyrightMetaEvent(MetaEvent):
+class CopyrightMetaEvent(MetaEventWithText):
     name = 'Copyright Notice'
     metacommand = 0x02
     length = 'varlen'
 
-class TrackNameEvent(MetaEvent):
+class TrackNameEvent(MetaEventWithText):
     name = 'Track Name'
     metacommand = 0x03
     length = 'varlen'
 
-class InstrumentNameEvent(MetaEvent):
+class InstrumentNameEvent(MetaEventWithText):
     name = 'Instrument Name'
     metacommand = 0x04
     length = 'varlen'
 
-class LryricsEvent(MetaEvent):
+class LyricsEvent(MetaEventWithText):
     name = 'Lyrics'
     metacommand = 0x05
     length = 'varlen'
 
-class MarkerEvent(MetaEvent):
+class MarkerEvent(MetaEventWithText):
     name = 'Marker'
     metacommand = 0x06
     length = 'varlen'
 
-class CuePointEvent(MetaEvent):
+class CuePointEvent(MetaEventWithText):
     name = 'Cue Point'
     metacommand = 0x07
     length = 'varlen'
 
-class SomethingEvent(MetaEvent):
-    name = 'Something'
-    metacommand = 0x09
+class ProgramNameEvent(MetaEventWithText):
+    name = 'Program Name'
+    metacommand = 0x08
+    length = 'varlen'
+
+class UnknownMetaEvent(MetaEvent):
+    name = 'Unknown'
+    # This class variable must be overriden by code calling the constructor,
+    # which sets a local variable of the same name to shadow the class variable.
+    metacommand = None
+
+    def __init__(self, **kw):
+        super(MetaEvent, self).__init__(**kw)
+        self.metacommand = kw['metacommand']
+
+    def copy(self, **kw):
+        kw['metacommand'] = self.metacommand
+        return super(UnknownMetaEvent, self).copy(kw)
 
 class ChannelPrefixEvent(MetaEvent):
     name = 'Channel Prefix'
@@ -315,7 +340,7 @@ class TimeSignatureEvent(MetaEvent):
     def get_denominator(self):
         return 2 ** self.data[1]
     def set_denominator(self, val):
-        self.data[1] = int(math.sqrt(val))
+        self.data[1] = int(math.log(val, 2))
     denominator = property(get_denominator, set_denominator)
 
     def get_metronome(self):
@@ -331,8 +356,23 @@ class TimeSignatureEvent(MetaEvent):
     thirtyseconds = property(get_thirtyseconds, set_thirtyseconds)
 
 class KeySignatureEvent(MetaEvent):
+    __slots__ = ['alternatives', 'minor']
     name = 'Key Signature'
     metacommand = 0x59
+    length = 2
+
+    def get_alternatives(self):
+        d = self.data[0]
+        return d - 256 if d > 127 else d
+    def set_alternatives(self, val):
+        self.data[0] = 256 + val if val < 0 else val
+    alternatives = property(get_alternatives, set_alternatives)
+
+    def get_minor(self):
+        return self.data[1]
+    def set_minor(self, val):
+        self.data[1] = val
+    minor = property(get_minor, set_minor)
 
 class SequencerSpecificEvent(MetaEvent):
     name = 'Sequencer Specific'

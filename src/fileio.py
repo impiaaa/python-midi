@@ -1,3 +1,5 @@
+from warnings import *
+
 from containers import *
 from events import *
 from struct import unpack, pack
@@ -61,11 +63,13 @@ class FileReader(object):
         if MetaEvent.is_event(stsmsg):
             cmd = ord(trackdata.next())
             if cmd not in EventRegistry.MetaEvents:
-                raise Warning, "Unknown Meta MIDI Event: " + `cmd`
-            cls = EventRegistry.MetaEvents[cmd]
+                warn("Unknown Meta MIDI Event: " + `cmd`, Warning)
+                cls = UnknownMetaEvent
+            else:
+                cls = EventRegistry.MetaEvents[cmd]
             datalen = read_varlen(trackdata)
             data = [ord(trackdata.next()) for x in range(datalen)]
-            return cls(tick=tick, data=data)
+            return cls(tick=tick, data=data, metacommand=cmd)
         # is this event a Sysex Event?
         elif SysexEvent.is_event(stsmsg):
             data = []
@@ -75,7 +79,7 @@ class FileReader(object):
                     break
                 data.append(datum)
             return SysexEvent(tick=tick, data=data)
-        # not a Meta MIDI event, must be a general message
+        # not a Meta MIDI event or a Sysex event, must be a general message
         else:
             key = stsmsg & 0xF0
             if key not in EventRegistry.Events:
@@ -133,7 +137,7 @@ class FileWriter(object):
             ret += chr(0xF0)
             ret += str.join('', map(chr, event.data))
             ret += chr(0xF7)
-        # not a Meta MIDI event, must be a general message
+        # not a Meta MIDI event or a Sysex event, must be a general message
         elif isinstance(event, Event):
             if not self.RunningStatus or \
                 self.RunningStatus.statusmsg != event.statusmsg or \

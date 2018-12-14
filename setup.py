@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
-from distutils.core import setup, Extension
+import os
+from setuptools import setup, Extension
+import setuptools.command.install
 
 __base__ = {
     'name':'midi', 
@@ -12,13 +14,34 @@ __base__ = {
     'py_modules':['midi.containers', 'midi.__init__', 'midi.events', 'midi.util', 'midi.fileio', 'midi.constants'],
     'ext_modules':[],
     'ext_package':'',
-    'scripts':['scripts/mididump', 'scripts/mididumphw', 'scripts/midiplay'],
+    'scripts':['scripts/mididump.py', 'scripts/mididumphw.py', 'scripts/midiplay.py'],
 }
 
+# this kludge ensures we run the build_ext first before anything else
+# otherwise, we will be missing generated files during the copy
+class Install_Command_build_ext_first(setuptools.command.install.install):
+    def run(self):
+        self.run_command("build_ext")
+        return setuptools.command.install.install.run(self)
+
 def setup_alsa(ns):
+    # scan for alsa include directory
+    dirs = ["/usr/include", "/usr/local/include"]
+    testfile = "alsa/asoundlib.h"
+    alsadir = None
+    for _dir in dirs:
+        tfn = os.path.join(_dir, testfile)
+        if os.path.exists(tfn):
+            alsadir = _dir
+            break
+    if not alsadir:
+        print("Warning: could not find asoundlib.h, not including ALSA sequencer support!")
+        return
     srclist = ["src/sequencer_alsa/sequencer_alsa.i"]
+    include_arg = "-I%s" % alsadir
     extns = {
-        'libraries':['asound'],
+        'libraries': ['asound'],
+        'swig_opts': [include_arg],
         #'extra_compile_args':['-DSWIGRUNTIME_DEBUG']
     }
     ext = Extension('_sequencer_alsa', srclist, **extns)
@@ -29,6 +52,7 @@ def setup_alsa(ns):
     ns['py_modules'].append('midi.sequencer.sequencer')
     ns['py_modules'].append('midi.sequencer.sequencer_alsa')
     ns['ext_package'] = 'midi.sequencer'
+    ns['cmdclass'] = {'install': Install_Command_build_ext_first}
 
 def configure_platform():
     from sys import platform

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-
+"""
+Attach to a MIDI device and send the contents of a MIDI file to it.
+"""
 import sys
 import time
 import midi
@@ -39,6 +41,8 @@ for event in events:
         continue
     if buf < 1000:
         time.sleep(.5)
-time.sleep(30)
+while event.tick > seq.queue_get_tick_time():
+    seq.drain()
+    time.sleep(.5)
 
 print 'The end?'
