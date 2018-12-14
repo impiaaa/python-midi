@@ -137,12 +137,13 @@ class FileWriter(object):
         elif isinstance(event, Event):
             if not self.RunningStatus or \
                 self.RunningStatus.statusmsg != event.statusmsg or \
-                self.RunningStatus.channel != event.channel:
-                    self.RunningStatus = event
+                self.RunningStatus.channel != event.channel or \
+                event.statusmsg&0x80 != 0:
                     ret += chr(event.statusmsg | event.channel)
             ret += str.join('', map(chr, event.data))
         else:
             raise ValueError, "Unknown MIDI Event: " + str(event)
+        self.RunningStatus = event
         return ret
 
 def write_midifile(midifile, pattern):
